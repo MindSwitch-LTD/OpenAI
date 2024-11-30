@@ -10,12 +10,19 @@ import Foundation
 import FoundationNetworking
 #endif
 
+/// Protocol for providing OpenAI API tokens dynamically
+public protocol OpenAITokenProvider {
+    /// Returns the OpenAI API token
+    /// This method will be called before each API request
+    func getToken() -> String
+}
+
 final public class OpenAI: OpenAIProtocol {
 
     public struct Configuration {
         
-        /// OpenAI API token. See https://platform.openai.com/docs/api-reference/authentication
-        public let token: String
+        /// OpenAI API token provider. See https://platform.openai.com/docs/api-reference/authentication
+        public let tokenProvider: OpenAITokenProvider
         
         /// Optional OpenAI organization identifier. See https://platform.openai.com/docs/api-reference/authentication
         public let organizationIdentifier: String?
@@ -24,16 +31,32 @@ final public class OpenAI: OpenAIProtocol {
         public let host: String
         public let port: Int
         public let scheme: String
+        
+        /// Base URL path for API requests. Default is "/api/v1"
+        public let baseURL: String
+        
         /// Default request timeout
         public let timeoutInterval: TimeInterval
         
-        public init(token: String, organizationIdentifier: String? = nil, host: String = "api.openai.com", port: Int = 443, scheme: String = "https", timeoutInterval: TimeInterval = 60.0) {
-            self.token = token
+        public init(tokenProvider: OpenAITokenProvider, organizationIdentifier: String? = nil, host: String = "api.openai.com", port: Int = 443, scheme: String = "https", baseURL: String = "/api/v1", timeoutInterval: TimeInterval = 60.0) {
+            self.tokenProvider = tokenProvider
             self.organizationIdentifier = organizationIdentifier
             self.host = host
             self.port = port
             self.scheme = scheme
+            self.baseURL = baseURL
             self.timeoutInterval = timeoutInterval
+        }
+        
+        // Keep the old init for backward compatibility
+        public init(token: String, organizationIdentifier: String? = nil, host: String = "api.openai.com", port: Int = 443, scheme: String = "https", baseURL: String = "/api/v1", timeoutInterval: TimeInterval = 60.0) {
+            self.init(tokenProvider: StaticTokenProvider(token: token),
+                     organizationIdentifier: organizationIdentifier,
+                     host: host,
+                     port: port,
+                     scheme: scheme,
+                     baseURL: baseURL,
+                     timeoutInterval: timeoutInterval)
         }
     }
     
@@ -126,7 +149,7 @@ extension OpenAI {
 
     func performRequest<ResultType: Codable>(request: any URLRequestBuildable, completion: @escaping (Result<ResultType, Error>) -> Void) {
         do {
-            let request = try request.build(token: configuration.token, 
+            let request = try request.build(token: configuration.tokenProvider.getToken(), 
                                             organizationIdentifier: configuration.organizationIdentifier,
                                             timeoutInterval: configuration.timeoutInterval)
             let task = session.dataTask(with: request) { data, _, error in
@@ -151,7 +174,7 @@ extension OpenAI {
     
     func performStreamingRequest<ResultType: Codable>(request: any URLRequestBuildable, onResult: @escaping (Result<ResultType, Error>) -> Void, completion: ((Error?) -> Void)?) {
         do {
-            let request = try request.build(token: configuration.token, 
+            let request = try request.build(token: configuration.tokenProvider.getToken(), 
                                             organizationIdentifier: configuration.organizationIdentifier,
                                             timeoutInterval: configuration.timeoutInterval)
             let session = StreamingSession<ResultType>(urlRequest: request)
@@ -174,7 +197,7 @@ extension OpenAI {
     
     func performSpeechRequest(request: any URLRequestBuildable, completion: @escaping (Result<AudioSpeechResult, Error>) -> Void) {
         do {
-            let request = try request.build(token: configuration.token, 
+            let request = try request.build(token: configuration.tokenProvider.getToken(), 
                                             organizationIdentifier: configuration.organizationIdentifier,
                                             timeoutInterval: configuration.timeoutInterval)
             
@@ -202,7 +225,7 @@ extension OpenAI {
         components.scheme = configuration.scheme
         components.host = configuration.host
         components.port = configuration.port
-        components.path = path
+        components.path = configuration.baseURL + path
         return components.url!
     }
 }
@@ -210,22 +233,35 @@ extension OpenAI {
 typealias APIPath = String
 extension APIPath {
     
-    static let completions = "/v1/completions"
-    static let embeddings = "/v1/embeddings"
-    static let chats = "/v1/chat/completions"
-    static let edits = "/v1/edits"
-    static let models = "/v1/models"
-    static let moderations = "/v1/moderations"
+    static let completions = "/completions"
+    static let embeddings = "/embeddings"
+    static let chats = "/chat/completions"
+    static let edits = "/edits"
+    static let models = "/models"
+    static let moderations = "/moderations"
     
-    static let audioSpeech = "/v1/audio/speech"
-    static let audioTranscriptions = "/v1/audio/transcriptions"
-    static let audioTranslations = "/v1/audio/translations"
+    static let audioSpeech = "/audio/speech"
+    static let audioTranscriptions = "/audio/transcriptions"
+    static let audioTranslations = "/audio/translations"
     
-    static let images = "/v1/images/generations"
-    static let imageEdits = "/v1/images/edits"
-    static let imageVariations = "/v1/images/variations"
+    static let images = "/images/generations"
+    static let imageEdits = "/images/edits"
+    static let imageVariations = "/images/variations"
     
     func withPath(_ path: String) -> String {
         self + "/" + path
+    }
+}
+
+// Default implementation that just returns a static token
+public struct StaticTokenProvider: OpenAITokenProvider {
+    let token: String
+    
+    public init(token: String) {
+        self.token = token
+    }
+    
+    public func getToken() -> String {
+        return token
     }
 }
