@@ -38,7 +38,17 @@ final public class OpenAI: OpenAIProtocol {
         /// Default request timeout
         public let timeoutInterval: TimeInterval
         
-        public init(tokenProvider: OpenAITokenProvider, organizationIdentifier: String? = nil, host: String = "api.openai.com", port: Int = 443, scheme: String = "https", baseURL: String = "/api/v1", timeoutInterval: TimeInterval = 60.0) {
+        /// Optional target URL to be included in request headers
+        public let targetUrl: String?
+        
+        public init(tokenProvider: OpenAITokenProvider, 
+                    organizationIdentifier: String? = nil, 
+                    host: String = "api.openai.com", 
+                    port: Int = 443, 
+                    scheme: String = "https", 
+                    baseURL: String = "/api/v1", 
+                    timeoutInterval: TimeInterval = 60.0,
+                    targetUrl: String? = nil) {
             self.tokenProvider = tokenProvider
             self.organizationIdentifier = organizationIdentifier
             self.host = host
@@ -46,17 +56,26 @@ final public class OpenAI: OpenAIProtocol {
             self.scheme = scheme
             self.baseURL = baseURL
             self.timeoutInterval = timeoutInterval
+            self.targetUrl = targetUrl
         }
         
         // Keep the old init for backward compatibility
-        public init(token: String, organizationIdentifier: String? = nil, host: String = "api.openai.com", port: Int = 443, scheme: String = "https", baseURL: String = "/api/v1", timeoutInterval: TimeInterval = 60.0) {
+        public init(token: String,
+                    organizationIdentifier: String? = nil,
+                    host: String = "api.openai.com",
+                    port: Int = 443,
+                    scheme: String = "https",
+                    baseURL: String = "/api/v1",
+                    timeoutInterval: TimeInterval = 60.0,
+                    targetUrl: String? = nil) {
             self.init(tokenProvider: StaticTokenProvider(token: token),
                      organizationIdentifier: organizationIdentifier,
                      host: host,
                      port: port,
                      scheme: scheme,
                      baseURL: baseURL,
-                     timeoutInterval: timeoutInterval)
+                     timeoutInterval: timeoutInterval,
+                     targetUrl: targetUrl)
         }
     }
     
@@ -149,9 +168,15 @@ extension OpenAI {
 
     func performRequest<ResultType: Codable>(request: any URLRequestBuildable, completion: @escaping (Result<ResultType, Error>) -> Void) {
         do {
-            let request = try request.build(token: configuration.tokenProvider.getToken(), 
-                                            organizationIdentifier: configuration.organizationIdentifier,
-                                            timeoutInterval: configuration.timeoutInterval)
+            var request = try request.build(token: configuration.tokenProvider.getToken(), 
+                                          organizationIdentifier: configuration.organizationIdentifier,
+                                          timeoutInterval: configuration.timeoutInterval)
+            
+            // Add the x-target-url header if targetUrl is set
+            if let targetUrl = configuration.targetUrl {
+                request.addValue(targetUrl, forHTTPHeaderField: "x-target-url")
+            }
+            
             let task = session.dataTask(with: request) { data, _, error in
                 if let error = error {
                     return completion(.failure(error))
@@ -174,9 +199,15 @@ extension OpenAI {
     
     func performStreamingRequest<ResultType: Codable>(request: any URLRequestBuildable, onResult: @escaping (Result<ResultType, Error>) -> Void, completion: ((Error?) -> Void)?) {
         do {
-            let request = try request.build(token: configuration.tokenProvider.getToken(), 
-                                            organizationIdentifier: configuration.organizationIdentifier,
-                                            timeoutInterval: configuration.timeoutInterval)
+            var request = try request.build(token: configuration.tokenProvider.getToken(), 
+                                          organizationIdentifier: configuration.organizationIdentifier,
+                                          timeoutInterval: configuration.timeoutInterval)
+            
+            // Add the x-target-url header if targetUrl is set
+            if let targetUrl = configuration.targetUrl {
+                request.addValue(targetUrl, forHTTPHeaderField: "x-target-url")
+            }
+            
             let session = StreamingSession<ResultType>(urlRequest: request)
             session.onReceiveContent = {_, object in
                 onResult(.success(object))
